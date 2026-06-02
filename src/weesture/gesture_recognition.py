@@ -1,8 +1,9 @@
+from __future__ import annotations
 import re
 import numpy as np
 from scipy.spatial.distance import euclidean
 from scipy.signal import savgol_filter
-from typing import Optional
+from typing import Optional, cast
 from collections.abc import Callable
 from numpy.typing import NDArray
 from operator import itemgetter
@@ -11,57 +12,87 @@ from operator import itemgetter
 def fastdtw(
     x: NDArray[np.float64],
     y: NDArray[np.float64],
-    dist: Callable[..., float] = euclidean,
+    dist: Callable[[NDArray[np.float64], NDArray[np.float64]], float] = euclidean,
     radius: int = 10,
-) -> np.float64:
+) -> float:
     """
     A simple implementation of Dynamic Time Warping with Sakoe-Chiba band.
     """
     len_x, len_y = len(x), len(y)
-    dtw_matrix = np.full((len_x + 1, len_y + 1), np.inf)
-    dtw_matrix[0, 0] = 0
+    previous_row: NDArray[np.float64] = np.full(len_y + 1, np.inf, dtype=np.float64)
+    current_row: NDArray[np.float64] = np.full(len_y + 1, np.inf, dtype=np.float64)
+    previous_row[0] = 0.0
 
     for i in range(1, len_x + 1):
         # Apply Sakoe-Chiba band
         start = max(1, i - radius)
         end = min(len_y + 1, i + radius + 1)
-        for j in range(start, end):
-            cost = dist(x[i - 1], y[j - 1])
-            dtw_matrix[i, j] = cost + min(
-                dtw_matrix[i - 1, j], dtw_matrix[i, j - 1], dtw_matrix[i - 1, j - 1]
+        current_row.fill(np.inf)
+
+        if dist is euclidean:
+            row_distances = y[start - 1 : end - 1] - x[i - 1]
+            costs = np.sqrt(np.sum(row_distances * row_distances, axis=1))
+        else:
+            x_1: NDArray[np.float64] = cast(NDArray[np.float64], x[i - 1])
+            costs = np.array(
+                [
+                    dist(x_1, cast(NDArray[np.float64], y[j - 1]))
+                    for j in range(start, end)
+                ],
+                dtype=np.float64,
             )
 
-    return dtw_matrix[len_x, len_y]
+        for offset, j in enumerate(range(start, end)):
+            cost: float = float(costs[offset])
+            
+            v1: float = float(previous_row[j])
+            v2: float = float(current_row[j - 1])
+            v3: float = float(previous_row[j - 1])
+            
+            min_prev: float = min(v1, v2, v3)
+            current_row[j] = cost + min_prev
+
+        previous_row, current_row = current_row, previous_row
+
+    return float(previous_row[len_y])
 
 
-def resample_sequence(sequence: NDArray[np.float64], num_samples: int = 50):
+def resample_sequence(
+    sequence: NDArray[np.float64], 
+    num_samples: int = 50
+) -> NDArray[np.float64]:
     """
     Resample a sequence to a fixed number of samples using linear interpolation.
     """
     if len(sequence) < 2:
         if len(sequence) == 1:
             return np.repeat(sequence, num_samples, axis=0)
-        return np.zeros((num_samples, 3))
+        return np.zeros((num_samples, 3), dtype=np.float64)
 
-    sequence = np.array(sequence)
-    old_indices = np.linspace(0, 1, len(sequence))
-    new_indices = np.linspace(0, 1, num_samples)
+    old_indices: NDArray[np.float64] = np.linspace(0.0, 1.0, len(sequence))
+    new_indices: NDArray[np.float64] = np.linspace(0.0, 1.0, num_samples)
 
-    resampled = np.zeros((num_samples, sequence.shape[1]))
+    resampled: NDArray[np.float64] = np.zeros((num_samples, sequence.shape[1]), dtype=np.float64)
     for i in range(sequence.shape[1]):
-        resampled[:, i] = np.interp(new_indices, old_indices, sequence[:, i])
+        target_seq: NDArray[np.float64] = sequence[:, i]
+        resampled_result: NDArray[np.float64] = cast(NDArray[np.float64], np.interp(new_indices, old_indices, target_seq))
+        resampled[:, i] = resampled_result
 
     return resampled
 
 
 class GestureRecognizer:
+    patterns: dict[str, list[NDArray[np.float64]]]
+    threshold: float
+    num_samples: int
+
     def __init__(self, patterns_dir: str = "patterns", threshold: float = 0.8) -> None:
-        self.patterns: dict[str, list[NDArray[np.float64]]] = {}
+        self.patterns = {}
         self.threshold = threshold
         self.num_samples = 50  # Standard length for comparison
         self.load_patterns(patterns_dir)
 
-    def load_patterns(self, patterns_dir: str):
+    def load_patterns(self, patterns_dir: str) -> None:
         import os
 
         if not os.path.exists(patterns_dir):
@@ -71,7 +102,10 @@ class GestureRecognizer:
         for filename in os.listdir(patterns_dir):
             if filename.endswith(".log"):
                 # Extract gesture name (e.g., 'circle' from 'circle.log' or 'circle_1.log')
-                name = re.split(r"[_.]", filename)[0]
+                name_parts = re.split(r"[_.]", filename)
+                if not name_parts:
+                    continue
+                name = name_parts[0]
                 path = os.path.join(patterns_dir, filename)
                 pattern = self.parse_log(path)
                 if pattern.size > 0:
@@ -83,7 +117,7 @@ class GestureRecognizer:
                     )
 
     def parse_log(self, path: str) -> NDArray[np.float64]:
-        pattern: list[list[float]] = []
+        pattern_data: list[list[float]] = []
         # Regex to extract yaw, pitch, roll and acc
         line_re = re.compile(
             r"yaw=\s*([+-]?\d+\.\d+)°\s+pitch=\s*([+-]?\d+\.\d+)°\s+roll=\s*([+-]?\d+\.\d+)°.*acc=\(([+-]?\d+\.\d+),([+-]?\d+\.\d+),([+-]?\d+\.\d+)\)"
@@ -94,17 +128,23 @@ class GestureRecognizer:
                 for line in f:
                     match = line_re.search(line)
                     if match:
-                        # y, p, r, ax, ay, az
-                        values = list(map(float, match.groups()))
-                        pattern.append(values)
+                        m_groups = cast(tuple[str, str, str, str, str, str], match.groups())
+                        v1 = float(m_groups[0])
+                        v2 = float(m_groups[1])
+                        v3 = float(m_groups[2])
+                        v4 = float(m_groups[3])
+                        v5 = float(m_groups[4])
+                        v6 = float(m_groups[5])
+                        pattern_data.append([v1, v2, v3, v4, v5, v6])
         except Exception as e:
             print(f"Error parsing {path}: {e}")
-            return np.array([])
+            return np.zeros((0, 3), dtype=np.float64)
 
-        if not pattern:
-            return np.array([])
+        if not pattern_data:
+            return np.zeros((0, 3), dtype=np.float64)
 
-        return self.preprocess(np.array(pattern))
+        arr: NDArray[np.float64] = np.array(pattern_data, dtype=np.float64)
+        return self.preprocess(arr)
 
     def preprocess(self, sequence: NDArray[np.float64]) -> NDArray[np.float64]:
         """
@@ -112,69 +152,66 @@ class GestureRecognizer:
         Supports 3D (orientation) or 6D (orientation + acceleration).
         """
         if len(sequence) == 0:
-            return np.zeros(
-                (self.num_samples, sequence.shape[1] if sequence.ndim > 1 else 3)
-            )
+            cols = sequence.shape[1] if sequence.ndim > 1 else 3
+            return np.zeros((self.num_samples, cols), dtype=np.float64)
 
-        sequence = np.array(sequence)
-        is_6d = sequence.shape[1] == 6
+        current_seq: NDArray[np.float64] = sequence.copy()
+        is_6d: bool = current_seq.shape[1] == 6
 
-        # 1. Angle unwrapping (only for the first 3 columns: yaw, pitch, roll)
-        sequence_rad = np.radians(sequence[:, :3])
-        sequence_unwrapped = np.unwrap(sequence_rad, axis=0)
-        sequence[:, :3] = np.degrees(sequence_unwrapped)
+        # 1. Angle unwrapping
+        sequence_rad: NDArray[np.float64] = np.radians(current_seq[:, :3])
+        sequence_unwrapped: NDArray[np.float64] = np.unwrap(sequence_rad, axis=0)
+        current_seq[:, :3] = np.degrees(sequence_unwrapped)
 
         # 2. Smoothing (Savitzky-Golay)
-        if len(sequence) > 11:
-            sequence = savgol_filter(sequence, window_length=7, polyorder=2, axis=0)
-        elif len(sequence) > 5:
-            sequence = savgol_filter(sequence, window_length=5, polyorder=2, axis=0)
+        if len(current_seq) > 11:
+            current_seq = savgol_filter(current_seq, window_length=7, polyorder=2, axis=0)
+        elif len(current_seq) > 5:
+            current_seq = savgol_filter(current_seq, window_length=5, polyorder=2, axis=0)
 
         # 3. Trim sequence (Endpoint Detection)
-        # Use variance or gradient of orientation to find start/end of movement
-        if len(sequence) > 10:
-            energy = np.sum(np.abs(np.gradient(sequence[:, :3], axis=0)), axis=1)
-            threshold = np.max(energy) * 0.1
-            active_indices = np.where(energy > threshold)[0]
+        if len(current_seq) > 10:
+            grad: NDArray[np.float64] = np.gradient(current_seq[:, :3], axis=0)
+            energy: NDArray[np.float64] = np.sum(np.abs(grad), axis=1)
+            max_energy: float = float(np.max(energy))
+            threshold: float = max_energy * 0.1
+            active_indices: NDArray[np.intp] = np.where(energy > threshold)[0]
             if active_indices.size > 0:
-                start, end = active_indices[0], active_indices[-1]
-                # Add some buffer
+                start: int = int(active_indices[0])
+                end: int = int(active_indices[-1])
                 start = max(0, start - 2)
-                end = min(len(sequence), end + 2)
-                sequence = sequence[start:end]
+                end = min(len(current_seq), end + 2)
+                current_seq = current_seq[start:end]
 
-        # 4. Resample to standard length
-        sequence = resample_sequence(sequence, self.num_samples)
+        # 4. Resample
+        resampled_seq: NDArray[np.float64] = resample_sequence(current_seq, self.num_samples)
 
         # 5. Feature Engineering
-        # Orientation: center relative to start
-        orientation = sequence[:, :3] - sequence[0, :3]
-        ranges = np.max(orientation, axis=0) - np.min(orientation, axis=0)
-        max_range = np.max(ranges)
+        orientation: NDArray[np.float64] = resampled_seq[:, :3] - resampled_seq[0, :3]
+        ranges: NDArray[np.float64] = np.max(orientation, axis=0) - np.min(orientation, axis=0)
+        max_range: float = float(np.max(ranges))
         if max_range > 1.0:
             orientation = orientation / max_range
 
-        # Orientation Gradient (Angular Velocity)
-        orient_grad = np.gradient(orientation, axis=0)
-        grad_max = np.max(np.abs(orient_grad))
+        orient_grad: NDArray[np.float64] = np.gradient(orientation, axis=0)
+        grad_max: float = float(np.max(np.abs(orient_grad)))
         if grad_max > 0.01:
             orient_grad = orient_grad / grad_max
 
+        result: NDArray[np.float64]
         if is_6d:
-            # Acceleration: standardize (mean=0, std=1) for each trial
-            accel = sequence[:, 3:]
-            accel = accel - np.mean(accel, axis=0)
-            acc_std = np.std(accel)
+            accel: NDArray[np.float64] = resampled_seq[:, 3:]
+            accel_mean: NDArray[np.float64] = np.mean(accel, axis=0)
+            accel = accel - accel_mean
+            acc_std: float = float(np.std(accel))
             if acc_std > 0.05:
                 accel = accel / acc_std
 
-            # Combine: Orient (3) + Grad (3) + Accel (3) = 9 features
-            sequence = np.hstack([orientation, orient_grad * 0.5, accel * 0.5])
+            result = np.hstack([orientation, orient_grad * 0.5, accel * 0.5])
         else:
-            # Combine: Orient (3) + Grad (3) = 6 features
-            sequence = np.hstack([orientation, orient_grad * 0.5])
+            result = np.hstack([orientation, orient_grad * 0.5])
 
-        return sequence
+        return result
 
     def recognize(
         self, sequence: list[tuple[float, ...]]
@@ -182,17 +219,16 @@ class GestureRecognizer:
         if not sequence or len(sequence) < 5:
             return None, float("inf")
 
-        processed_sequence: NDArray[np.float64] = self.preprocess(np.array(sequence))
+        seq_arr: NDArray[np.float64] = np.array(sequence, dtype=np.float64)
+        processed_sequence: NDArray[np.float64] = self.preprocess(seq_arr)
 
-        results: list[tuple[str, np.float64]] = []
+        results: list[tuple[str, float]] = []
 
         for name, pattern_list in self.patterns.items():
-            best_dist_for_gesture = np.float64("inf")
+            best_dist_for_gesture: float = float("inf")
             for pattern in pattern_list:
-                # DTW distance on preprocessed sequences
                 dist = fastdtw(processed_sequence, pattern)
-                # Normalize by total steps in the DTW path (approx 2 * num_samples)
-                normalized_dist = dist / (2 * self.num_samples)
+                normalized_dist: float = dist / (2 * self.num_samples)
 
                 if normalized_dist < best_dist_for_gesture:
                     best_dist_for_gesture = normalized_dist
@@ -202,12 +238,9 @@ class GestureRecognizer:
         if not results:
             return None, float("inf")
 
-        # Sort by distance
         results.sort(key=itemgetter(1))
-
         best_match, min_dist = results[0]
 
-        # print candidates for debugging
         print(f"Candidates: {', '.join([f'{n}: {d:.2f}' for n, d in results[:3]])}")
 
         if min_dist > self.threshold:
@@ -217,7 +250,6 @@ class GestureRecognizer:
 
 
 if __name__ == "__main__":
-    # Test loading
     recognizer = GestureRecognizer()
     for name, patterns in recognizer.patterns.items():
         print(f"Gesture {name}: {len(patterns)} variations")

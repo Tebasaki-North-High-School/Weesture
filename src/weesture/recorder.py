@@ -46,7 +46,7 @@ class GestureRecorder:
         self.fusion.calibrate_gyro(samples)
         print("\nCalibration complete.")
 
-    def record(self, gesture_name: str):
+    def record(self, gesture_name: str) -> None:
         print(f"\nReady to record gesture: '{gesture_name}'")
 
         while True:

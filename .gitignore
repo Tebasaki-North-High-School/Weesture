@@ -1,10 +1,15 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
+.vscode/
+**/__pycache__/
+**/*.egg-info/
+.coverage
+.coverage.*
+.cache
+.venv/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
 dist/
-wheels/
-*.egg-info
+build/
+htmlcov/
 
-# Virtual environments
-.venv
+patterns/
