@@ -2,7 +2,7 @@ import time
 import os
 import sys
 import math
-from weeee import Wiimote, buttons, ImuFusion
+from weeee import Wiimote, buttons
 
 
 class GestureRecorder:
@@ -19,8 +19,6 @@ class GestureRecorder:
             print(f"Error connecting to Wiimote: {e}")
             exit(1)
 
-        self.fusion = ImuFusion()
-
         try:
             self.wiimote.require_motion_plus()
             print("MotionPlus activated.")
@@ -32,8 +30,6 @@ class GestureRecorder:
         if self.has_gyro:
             self.calibrate_gyro()
 
-        self.last_time = time.time()
-
     def calibrate_gyro(self) -> None:
         print("Calibrating gyro... Keep still.", end="", flush=True)
         samples: list[dict[str, int]] = []
@@ -43,7 +39,9 @@ class GestureRecorder:
                 samples.append(self.wiimote.gyro_raw.copy())
                 if len(samples) % 10 == 0:
                     print(".", end="", flush=True)
-        self.fusion.calibrate_gyro(samples)
+        assert self.wiimote.fusion is not None
+        self.wiimote.fusion.calibrate_gyro(samples)
+        self.wiimote.fusion._first_frame = True
         print("\nCalibration complete.")
 
     def record(self, gesture_name: str) -> None:
@@ -79,29 +77,15 @@ class GestureRecorder:
                 ]
 
                 while True:
-                    current_time = time.time()
-                    dt = min(current_time - self.last_time, 0.1)
-                    self.last_time = current_time
-
                     self.wiimote.update()
                     ax, ay, az = self.wiimote.gforce
 
                     raw = {"roll": 0, "pitch": 0, "yaw": 0}
                     if self.has_gyro:
                         raw = self.wiimote.gyro_raw
-                        self.fusion.update(
-                            ax,
-                            ay,
-                            az,
-                            gyro=raw,
-                            dt=dt,
-                            gyro_slow=self.wiimote.gyro_slow,
-                        )
-                    else:
-                        self.fusion.update(ax, ay, az, dt=dt)
 
                     if self.wiimote.is_pressed(buttons.BUTTON_HOME):
-                        self.fusion.reset_yaw()
+                        self.wiimote.reset_yaw()
 
                     is_b_pressed = self.wiimote.is_pressed(buttons.BUTTON_B)
 
@@ -112,9 +96,9 @@ class GestureRecorder:
 
                     if recording:
                         y, p, r = (
-                            self.fusion.yaw_deg,
-                            self.fusion.pitch_deg,
-                            self.fusion.roll_deg,
+                            self.wiimote.yaw_deg,
+                            self.wiimote.pitch_deg,
+                            self.wiimote.roll_deg,
                         )
                         acc_mag = math.sqrt(ax**2 + ay**2 + az**2)
                         # Format matching the original logs
@@ -122,7 +106,7 @@ class GestureRecorder:
                             f"yaw={y:+7.1f}°  pitch={p:+7.1f}°  roll={r:+7.1f}°  "
                             f"raw=({raw['roll']:5d},{raw['pitch']:5d},{raw['yaw']:5d})  "
                             f"acc=({ax:+.3f},{ay:+.3f},{az:+.3f})  "
-                            f"|g|={acc_mag:.3f}  dt={int(dt * 1000)}ms    F"
+                            f"|g|={acc_mag:.3f}"
                         )
                         data_lines.append(line)
 

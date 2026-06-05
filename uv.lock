@@ -588,8 +588,8 @@ wheels = [
 
 [[package]]
 name = "weeee"
-version = "0.0.2"
-source = { git = "https://github.com/Tebasaki-North-High-School/Weeee#9f0286e84f708a9329783ca7b43c0b2195b34f21" }
+version = "0.0.3"
+source = { git = "https://github.com/Tebasaki-North-High-School/Weeee#782bf1ef2d0ef77b07c70899b2529d20fdc30ebd" }
 dependencies = [
     { name = "hidapi" },
     { name = "numpy" },
@@ -598,7 +598,7 @@ dependencies = [
 
 [[package]]
 name = "weesture"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
