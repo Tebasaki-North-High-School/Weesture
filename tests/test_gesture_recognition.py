@@ -11,26 +11,40 @@ from weesture.gesture_recognition import (
 
 def test_fastdtw() -> None:
     # Simple case: identical sequences
-    x: np.ndarray[tuple[int, int], np.dtype[np.float64]] = np.array(((0, 0, 0), (1, 1, 1), (2, 2, 2)), dtype=np.float64)
-    y: np.ndarray[tuple[int, int], np.dtype[np.float64]] = np.array(((0, 0, 0), (1, 1, 1), (2, 2, 2)), dtype=np.float64)
+    x: np.ndarray[tuple[int, int], np.dtype[np.float64]] = np.array(
+        ((0, 0, 0), (1, 1, 1), (2, 2, 2)), dtype=np.float64
+    )
+    y: np.ndarray[tuple[int, int], np.dtype[np.float64]] = np.array(
+        ((0, 0, 0), (1, 1, 1), (2, 2, 2)), dtype=np.float64
+    )
     assert fastdtw(x, y) == 0.0
 
     # Slightly different
-    y2: np.ndarray[tuple[int, int], np.dtype[np.float64]] = np.array(((0, 0, 0), (0.5, 0.5, 0.5), (1, 1, 1), (2, 2, 2)), dtype=np.float64)
+    y2: np.ndarray[tuple[int, int], np.dtype[np.float64]] = np.array(
+        ((0, 0, 0), (0.5, 0.5, 0.5), (1, 1, 1), (2, 2, 2)), dtype=np.float64
+    )
     dist = fastdtw(x, y2)
     assert dist >= 0.0
 
 
 def test_resample_sequence() -> None:
-    seq: np.ndarray[tuple[int, int], np.dtype[np.float64]] = np.array(((0, 0, 0), (10, 10, 10)), dtype=np.float64)
+    seq: np.ndarray[tuple[int, int], np.dtype[np.float64]] = np.array(
+        ((0, 0, 0), (10, 10, 10)), dtype=np.float64
+    )
     resampled = resample_sequence(seq, num_samples=5)
     assert len(resampled) == 5
-    
+
     # Casting rows to NDArray to satisfy strict mypy indexing rules
-    r0: np.ndarray[tuple[int], np.dtype[np.float64]] = cast(np.ndarray[tuple[int], np.dtype[np.float64]], resampled[0])
-    rlast: np.ndarray[tuple[int], np.dtype[np.float64]] = cast(np.ndarray[tuple[int], np.dtype[np.float64]], resampled[-1])
-    r2: np.ndarray[tuple[int], np.dtype[np.float64]] = cast(np.ndarray[tuple[int], np.dtype[np.float64]], resampled[2])
-    
+    r0: np.ndarray[tuple[int], np.dtype[np.float64]] = cast(
+        np.ndarray[tuple[int], np.dtype[np.float64]], resampled[0]
+    )
+    rlast: np.ndarray[tuple[int], np.dtype[np.float64]] = cast(
+        np.ndarray[tuple[int], np.dtype[np.float64]], resampled[-1]
+    )
+    r2: np.ndarray[tuple[int], np.dtype[np.float64]] = cast(
+        np.ndarray[tuple[int], np.dtype[np.float64]], resampled[2]
+    )
+
     assert np.allclose(r0, [0.0, 0.0, 0.0])
     assert np.allclose(rlast, [10.0, 10.0, 10.0])
     assert np.allclose(r2, [5.0, 5.0, 5.0])
@@ -46,8 +60,10 @@ def test_preprocess() -> None:
 
     # Now returns 6 features for 3D input (Position + Gradient)
     assert processed.shape == (recognizer.num_samples, 6)
-    
-    p0: np.ndarray[tuple[int], np.dtype[np.float64]] = cast(np.ndarray[tuple[int], np.dtype[np.float64]], processed[0, :3])
+
+    p0: np.ndarray[tuple[int], np.dtype[np.float64]] = cast(
+        np.ndarray[tuple[int], np.dtype[np.float64]], processed[0, :3]
+    )
     # Check centering of orientation (first 3 elements should be 0)
     assert np.allclose(p0, [0.0, 0.0, 0.0])
 
@@ -78,8 +94,12 @@ def test_recognize_simple() -> None:
     recognizer = GestureRecognizer(patterns_dir="non_existent", threshold=0.5)
 
     # Create a synthetic pattern: a simple linear move on X axis
-    pattern: np.ndarray[tuple[int, int], np.dtype[np.float64]] = np.zeros((40, 3), dtype=np.float64)
-    vals: np.ndarray[tuple[int], np.dtype[np.float64]] = cast(np.ndarray[tuple[int], np.dtype[np.float64]], np.linspace(0, 10, 40))
+    pattern: np.ndarray[tuple[int, int], np.dtype[np.float64]] = np.zeros(
+        (40, 3), dtype=np.float64
+    )
+    vals: np.ndarray[tuple[int], np.dtype[np.float64]] = cast(
+        np.ndarray[tuple[int], np.dtype[np.float64]], np.linspace(0, 10, 40)
+    )
     pattern[:, 0] = vals
 
     recognizer.patterns["line"] = [recognizer.preprocess(pattern)]
@@ -88,23 +108,33 @@ def test_recognize_simple() -> None:
     # Convert NDArray to list of tuples for recognize
     sequence: list[tuple[float, ...]] = []
     for i in range(len(pattern)):
-        row: np.ndarray[tuple[int], np.dtype[np.float64]] = cast(np.ndarray[tuple[int], np.dtype[np.float64]], pattern[i])
+        row: np.ndarray[tuple[int], np.dtype[np.float64]] = cast(
+            np.ndarray[tuple[int], np.dtype[np.float64]], pattern[i]
+        )
         sequence.append((float(row[0]), float(row[1]), float(row[2])))
-        
+
     gesture, score = recognizer.recognize(sequence)
     assert gesture == "line"
     assert score < 0.1
 
     # Create a completely different pattern: constant move on Y axis
-    other_pattern: np.ndarray[tuple[int, int], np.dtype[np.float64]] = np.zeros((40, 3), dtype=np.float64)
-    other_vals: np.ndarray[tuple[int], np.dtype[np.float64]] = cast(np.ndarray[tuple[int], np.dtype[np.float64]], np.linspace(0, 10, 40))
+    other_pattern: np.ndarray[tuple[int, int], np.dtype[np.float64]] = np.zeros(
+        (40, 3), dtype=np.float64
+    )
+    other_vals: np.ndarray[tuple[int], np.dtype[np.float64]] = cast(
+        np.ndarray[tuple[int], np.dtype[np.float64]], np.linspace(0, 10, 40)
+    )
     other_pattern[:, 1] = other_vals
 
     other_sequence: list[tuple[float, ...]] = []
     for i in range(len(other_pattern)):
-        row_other: np.ndarray[tuple[int], np.dtype[np.float64]] = cast(np.ndarray[tuple[int], np.dtype[np.float64]], other_pattern[i])
-        other_sequence.append((float(row_other[0]), float(row_other[1]), float(row_other[2])))
-        
+        row_other: np.ndarray[tuple[int], np.dtype[np.float64]] = cast(
+            np.ndarray[tuple[int], np.dtype[np.float64]], other_pattern[i]
+        )
+        other_sequence.append(
+            (float(row_other[0]), float(row_other[1]), float(row_other[2]))
+        )
+
     gesture, score = recognizer.recognize(other_sequence)
     # It should either not match "line" or have a high score
     assert gesture is None or score > 0.3

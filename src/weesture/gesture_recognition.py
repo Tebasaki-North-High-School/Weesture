@@ -1,55 +1,50 @@
 from __future__ import annotations
+import os
 import re
 import numpy as np
-from scipy.spatial.distance import euclidean
+from numba import njit
 from scipy.signal import savgol_filter
 from typing import Optional, cast
-from collections.abc import Callable
 from numpy.typing import NDArray
 from operator import itemgetter
 
 
-def fastdtw(
+@njit(cache=True)  # type: ignore[untyped-decorator]
+def fastdtw(  # type: ignore[misc]
     x: NDArray[np.float64],
     y: NDArray[np.float64],
-    dist: Callable[[NDArray[np.float64], NDArray[np.float64]], float] = euclidean,
     radius: int = 10,
 ) -> float:
-    """
-    A simple implementation of Dynamic Time Warping with Sakoe-Chiba band.
-    """
-    len_x, len_y = len(x), len(y)
-    previous_row: NDArray[np.float64] = np.full(len_y + 1, np.inf, dtype=np.float64)
-    current_row: NDArray[np.float64] = np.full(len_y + 1, np.inf, dtype=np.float64)
+    len_x, len_y = x.shape[0], y.shape[0]
+    previous_row = np.full(len_y + 1, np.inf, dtype=np.float64)
+    current_row = np.full(len_y + 1, np.inf, dtype=np.float64)
     previous_row[0] = 0.0
 
     for i in range(1, len_x + 1):
-        # Apply Sakoe-Chiba band
         start = max(1, i - radius)
         end = min(len_y + 1, i + radius + 1)
         current_row.fill(np.inf)
 
-        if dist is euclidean:
-            row_distances = y[start - 1 : end - 1] - x[i - 1]
-            costs = np.sqrt(np.sum(row_distances * row_distances, axis=1))
-        else:
-            x_1: NDArray[np.float64] = cast(NDArray[np.float64], x[i - 1])
-            costs = np.array(
-                [
-                    dist(x_1, cast(NDArray[np.float64], y[j - 1]))
-                    for j in range(start, end)
-                ],
-                dtype=np.float64,
-            )
+        diff = y[start - 1 : end - 1] - x[i - 1]
+        costs = np.sqrt(np.sum(diff * diff, axis=1))
 
-        for offset, j in enumerate(range(start, end)):
-            cost: float = float(costs[offset])
-            
-            v1: float = float(previous_row[j])
-            v2: float = float(current_row[j - 1])
-            v3: float = float(previous_row[j - 1])
-            
-            min_prev: float = min(v1, v2, v3)
+        for j in range(start, end):
+            idx = j - start
+            cost = costs[idx]
+            v1 = previous_row[j]
+            v2 = current_row[j - 1]
+            v3 = previous_row[j - 1]
+
+            if v1 < v2:
+                if v1 < v3:
+                    min_prev = v1
+                else:
+                    min_prev = v3
+            else:
+                if v2 < v3:
+                    min_prev = v2
+                else:
+                    min_prev = v3
             current_row[j] = cost + min_prev
 
         previous_row, current_row = current_row, previous_row
@@ -58,8 +53,7 @@ def fastdtw(
 
 
 def resample_sequence(
-    sequence: NDArray[np.float64], 
-    num_samples: int = 50
+    sequence: NDArray[np.float64], num_samples: int = 50
 ) -> NDArray[np.float64]:
     """
     Resample a sequence to a fixed number of samples using linear interpolation.
@@ -72,10 +66,14 @@ def resample_sequence(
     old_indices: NDArray[np.float64] = np.linspace(0.0, 1.0, len(sequence))
     new_indices: NDArray[np.float64] = np.linspace(0.0, 1.0, num_samples)
 
-    resampled: NDArray[np.float64] = np.zeros((num_samples, sequence.shape[1]), dtype=np.float64)
+    resampled: NDArray[np.float64] = np.zeros(
+        (num_samples, sequence.shape[1]), dtype=np.float64
+    )
     for i in range(sequence.shape[1]):
         target_seq: NDArray[np.float64] = sequence[:, i]
-        resampled_result: NDArray[np.float64] = cast(NDArray[np.float64], np.interp(new_indices, old_indices, target_seq))
+        resampled_result: NDArray[np.float64] = cast(
+            NDArray[np.float64], np.interp(new_indices, old_indices, target_seq)
+        )
         resampled[:, i] = resampled_result
 
     return resampled
@@ -93,8 +91,6 @@ class GestureRecognizer:
         self.load_patterns(patterns_dir)
 
     def load_patterns(self, patterns_dir: str) -> None:
-        import os
-
         if not os.path.exists(patterns_dir):
             print(f"Warning: Patterns directory {patterns_dir} not found.")
             return
@@ -128,7 +124,9 @@ class GestureRecognizer:
                 for line in f:
                     match = line_re.search(line)
                     if match:
-                        m_groups = cast(tuple[str, str, str, str, str, str], match.groups())
+                        m_groups = cast(
+                            tuple[str, str, str, str, str, str], match.groups()
+                        )
                         v1 = float(m_groups[0])
                         v2 = float(m_groups[1])
                         v3 = float(m_groups[2])
@@ -165,9 +163,13 @@ class GestureRecognizer:
 
         # 2. Smoothing (Savitzky-Golay)
         if len(current_seq) > 11:
-            current_seq = savgol_filter(current_seq, window_length=7, polyorder=2, axis=0)
+            current_seq = savgol_filter(
+                current_seq, window_length=7, polyorder=2, axis=0
+            )
         elif len(current_seq) > 5:
-            current_seq = savgol_filter(current_seq, window_length=5, polyorder=2, axis=0)
+            current_seq = savgol_filter(
+                current_seq, window_length=5, polyorder=2, axis=0
+            )
 
         # 3. Trim sequence (Endpoint Detection)
         if len(current_seq) > 10:
@@ -184,11 +186,15 @@ class GestureRecognizer:
                 current_seq = current_seq[start:end]
 
         # 4. Resample
-        resampled_seq: NDArray[np.float64] = resample_sequence(current_seq, self.num_samples)
+        resampled_seq: NDArray[np.float64] = resample_sequence(
+            current_seq, self.num_samples
+        )
 
         # 5. Feature Engineering
         orientation: NDArray[np.float64] = resampled_seq[:, :3] - resampled_seq[0, :3]
-        ranges: NDArray[np.float64] = np.max(orientation, axis=0) - np.min(orientation, axis=0)
+        ranges: NDArray[np.float64] = np.max(orientation, axis=0) - np.min(
+            orientation, axis=0
+        )
         max_range: float = float(np.max(ranges))
         if max_range > 1.0:
             orientation = orientation / max_range
